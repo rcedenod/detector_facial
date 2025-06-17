@@ -140,47 +140,59 @@ class EmotionDetectionApp:
     
     def process_image_data(self, img):
         display_img = img.copy()
-        gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+        # Convertir a escala de grises para detección
+        gray = cv2.cvtColor(display_img, cv2.COLOR_RGB2GRAY)
         
-        # Detectar rostros - CORRECCIÓN APLICADA AQUÍ
+        # Parámetros optimizados para imágenes pequeñas
         faces = self.face_cascade.detectMultiScale(
             gray,
-            scaleFactor=1.1,
-            minNeighbors=5,
-            minSize=(30, 30)
+            scaleFactor=1.05,
+            minNeighbors=3,
+            minSize=(20, 20)
         )
         
+        # Usar imagen completa si no se detectan rostros en imágenes pequeñas
         if len(faces) == 0:
-            self.result_var.set("No se detectaron rostros")
-            self.progress_var.set("0%")
-            self.progress['value'] = 0
-        else:
-            # Procesar cada rostro detectado
-            for (x, y, w, h) in faces:
-                # Recortar y preprocesar el rostro
-                face_roi = gray[y:y+h, x:x+w]
-                face_roi = cv2.resize(face_roi, (48, 48))
-                face_roi = face_roi.astype("float") / 255.0
-                face_roi = img_to_array(face_roi)
-                face_roi = np.expand_dims(face_roi, axis=0)
-                
-                # Realizar predicción
-                predictions = self.model.predict(face_roi)[0]
-                emotion_idx = np.argmax(predictions)
-                emotion_key = self.emotion_labels[emotion_idx]
-                emotion = self.translations.get(emotion_key, emotion_key)
-                confidence = int(predictions[emotion_idx] * 100)
-                
-                # Dibujar resultados en la imagen
-                cv2.rectangle(display_img, (x, y), (x+w, y+h), (0, 255, 0), 2)
-                emotion_text = f"{emotion} {confidence}%"
-                cv2.putText(display_img, emotion_text, (x, y-10), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
-                
-                # Actualizar UI
-                self.result_var.set(emotion)
-                self.progress_var.set(f"{confidence}%")
-                self.progress['value'] = confidence
+            h, w = gray.shape
+            if h <= 100 and w <= 100:
+                faces = [(0, 0, w, h)]
+            else:
+                self.result_var.set("No se detectaron rostros")
+                self.progress_var.set("0%")
+                self.progress['value'] = 0
+                # Mostrar imagen sin anotaciones
+                display_img = Image.fromarray(display_img)
+                display_img = display_img.resize((640, 480))
+                imgtk = ImageTk.PhotoImage(image=display_img)
+                self.image_label.imgtk = imgtk
+                self.image_label.configure(image=imgtk)
+                return
+        
+        # Procesar cada rostro detectado
+        for (x, y, w, h) in faces:
+            # Recortar y preprocesar el rostro (SOLUCIÓN CLAVE: usar escala de grises)
+            face_roi = gray[y:y+h, x:x+w]  # Usar la imagen en escala de grises
+            face_roi = cv2.resize(face_roi, (48, 48))
+            
+            # Preparar imagen para el modelo (SOLUCIÓN CLAVE)
+            face_roi = face_roi.astype("float") / 255.0
+            face_roi = np.expand_dims(face_roi, axis=-1)  # Añadir dimensión del canal (48,48,1)
+            face_roi = np.expand_dims(face_roi, axis=0)   # Añadir dimensión del batch (1,48,48,1)
+            
+            # Realizar predicción
+            predictions = self.model.predict(face_roi)[0]
+            emotion_idx = np.argmax(predictions)
+            emotion_key = self.emotion_labels[emotion_idx]
+            emotion = self.translations.get(emotion_key, emotion_key)
+            
+            # Dibujar resultados en la imagen
+            cv2.rectangle(display_img, (x, y), (x+w, y+h), (0, 255, 0), 2)
+            emotion_text = f"{emotion}"
+            cv2.putText(display_img, emotion_text, (x, y-10), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
+            
+            # Actualizar UI
+            self.result_var.set(emotion)
         
         # Mostrar imagen con resultados
         display_img = Image.fromarray(display_img)
